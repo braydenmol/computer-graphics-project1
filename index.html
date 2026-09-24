@@ -937,6 +937,26 @@ function clearDepthBuffer() {
     document.addEventListener("keydown", (event) => {
 
       event.preventDefault();
+
+      // For GitHub hosting
+      if (event.code === "Digit1" || event.code === "Numpad1") {
+        renderMode = 1;
+        draw();
+        return;
+      }
+
+      if (event.code === "Digit2" || event.code === "Numpad2") {
+        renderMode = 2;
+        draw();
+        return;
+      }
+
+      if (event.code === "Digit3" || event.code === "Numpad3") {
+        renderMode = 3;
+        draw();
+        return;
+      }
+
        switch (event.key) {
         case "ArrowUp":
           
@@ -965,18 +985,6 @@ function clearDepthBuffer() {
           
           console.log("Right arrow pressed");
           camera.x -= 1;
-          draw();
-          break;
-        case "1":
-          renderMode = 1;
-          draw();
-          break;
-        case "2":
-          renderMode = 2;
-          draw();
-          break;
-        case "3":
-          renderMode = 3;
           draw();
           break;
         case "r":
