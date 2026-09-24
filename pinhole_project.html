@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My First Rendering Algo</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #050510;
+      color: white;
+      font-family: Arial, sans-serif;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #info {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      padding: 12px 14px;
+      background: rgba(0, 0, 0, 0.6);
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+
+  <div id="info">
+    <b>3D Pinhole Camera Projection</b><br>
+    Brayden Molinyawe<br><br>
+
+    <b>Controls</b><br>
+    ↑ Move Forward<br>
+    ↓ Move Backward<br>
+    ← Move Left<br>
+    → Move Right<br>
+    Space - Toggle StreetLights<br>
+    1 - Level 1 Wireframe<br>
+    2 - Level 2 Pixel Wireframe<br>
+    3 - Level 3 Filled Triangles<br>
+    R - Reset Camera
+  </div>
+
+<script>
+
+  //we add shapes (like lines) to this canvas
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+
+
+  const rows = 200;
+  const cols = 320;
+  const pixelGrid = Array.from({ length: cols }, () => Array(rows).fill("#050510"));
+  const depthBuffer = Array.from({ length : cols }, () => Array(rows).fill(Infinity));
+
+  let seePixelOutline = false;
+
+  // 1 = Level 1
+  // 2 = Level 2
+  // 3 = Level 3
+  let renderMode = 1;
+
+  // MODELS
+  // Building model
+  const buildingModel = {
+    vertices: [
+        { x:  1, y:  2, z:  1 }, // A
+        { x: -1, y:  2, z:  1 }, // B
+        { x:  1, y: -2, z:  1 }, // C
+        { x: -1, y: -2, z:  1 }, // D
+        { x:  1, y:  2, z: -1 }, // E
+        { x: -1, y:  2, z: -1 }, // F
+        { x:  1, y: -2, z: -1 }, // G
+        { x: -1, y: -2, z: -1 }  // H
+    ],
+
+    edges: [
+        [0, 1], //AB
+        [0, 2], //AC
+        [0, 4], //AE
+        [2, 3], //CD
+        [1, 3], //BD
+        [2, 6], //CG
+        [4, 5], //EF
+        [4, 6], //EG
+        [1, 5], //BF
+        [6, 7], //GH
+        [5, 7], //FH
+        [3, 7], //DH
+    ],
+
+    triangles: [
+        // Front face
+        [0, 1, 3],
+        [0, 3, 2],
+
+        // Back face
+        [4, 6, 7],
+        [4, 7, 5],
+
+        // Top face
+        [0, 4, 5],
+        [0, 5, 1],
+
+        // Bottom face
+        [2, 3, 7],
+        [2, 7, 6],
+
+        // Right face
+        [0, 2, 6],
+        [0, 6, 4],
+
+        // Left face
+        [1, 5, 7],
+        [1, 7, 3]
+    ]
+  }
+
+
+  // Streetlight model
+  const streetLightModel = {
+      vertices: [
+        // Pole
+        { x: 0, y: -2, z: 0 }, // bottom of pole
+        { x: 0, y: 2, z: 0 },   // top of pole
+
+        // Light fixture - front face
+        { x: -0.75, y: 2,   z:  0.4 }, // 2
+        { x:  0.75, y: 2,   z:  0.4 }, // 3
+        { x: -0.75, y: 2.5, z:  0.4 }, // 4
+        { x:  0.75, y: 2.5, z:  0.4 }, // 5
+
+        // Light fixture - back face
+        { x: -0.75, y: 2,   z: -0.4 }, // 6
+        { x:  0.75, y: 2,   z: -0.4 }, // 7
+        { x: -0.75, y: 2.5, z: -0.4 }, // 8
+        { x:  0.75, y: 2.5, z: -0.4 },  // 9
+
+        // Pole vertices 
+        { x: -0.08, y: -2, z:  0.08 }, // 10
+        { x:  0.08, y: -2, z:  0.08 }, // 11
+        { x: -0.08, y:  2, z:  0.08 }, // 12
+        { x:  0.08, y:  2, z:  0.08 }, // 13
+
+        { x: -0.08, y: -2, z: -0.08 }, // 14
+        { x:  0.08, y: -2, z: -0.08 }, // 15
+        { x: -0.08, y:  2, z: -0.08 }, // 16
+        { x:  0.08, y:  2, z: -0.08 }  // 17
+      ], 
+
+      edges: [
+        // Pole
+        [0, 1],
+
+        // Front of light
+        [2, 3],
+        [2, 4],
+        [3, 5],
+        [4, 5],
+
+        // Back of light
+        [6, 7],
+        [6, 8],
+        [7, 9],
+        [8, 9],
+
+        // Connect front and back
+        [2, 6],
+        [3, 7],
+        [4, 8],
+        [5, 9],
+
+        // Connect pole to fixture
+        [1, 2],
+        [1, 3]
+    ], 
+
+    triangles: [
+
+        // Front face
+        [2, 3, 5],
+        [2, 5, 4],
+
+        // Back face
+        [6, 8, 9],
+        [6, 9, 7],
+
+        // Bottom face
+        [2, 6, 7],
+        [2, 7, 3],
+
+        // Top face
+        [4, 5, 9],
+        [4, 9, 8],
+
+        // Left side
+        [2, 4, 8],
+        [2, 8, 6],
+
+        // Right side
+        [3, 7, 9],
+        [3, 9, 5],
+
+        // POLE
+
+        // Front
+        [10, 11, 13],
+        [10, 13, 12],
+
+        // Back
+        [14, 16, 17],
+        [14, 17, 15],
+
+        // Bottom
+        [10, 14, 15],
+        [10, 15, 11],
+
+        // Top
+        [12, 13, 17],
+        [12, 17, 16],
+
+        // Left
+        [10, 12, 16],
+        [10, 16, 14],
+
+        // Right
+        [11, 15, 17],
+        [11, 17, 13]
+    ]
+  }
+
+  // Car model
+const carModel = {
+    vertices: [
+        // Main body - front
+        { x: -2, y: -1, z:  2 }, // 0
+        { x:  2, y: -1, z:  2 }, // 1
+        { x: -2, y:  0, z:  2 }, // 2
+        { x:  2, y:  0, z:  2 }, // 3
+
+        // Main body - back
+        { x: -2, y: -1, z: -2 }, // 4
+        { x:  2, y: -1, z: -2 }, // 5
+        { x: -2, y:  0, z: -2 }, // 6
+        { x:  2, y:  0, z: -2 }, // 7
+
+        // Top/cabin
+        { x: -1, y: 0, z:  1.5 }, // 8
+        { x:  1, y: 0, z:  1.5 }, // 9
+        { x: -1, y: 1, z:  1.5 }, // 10
+        { x:  1, y: 1, z:  1.5 }, // 11
+
+        { x: -1, y: 0, z: -1.5 }, // 12
+        { x:  1, y: 0, z: -1.5 }, // 13
+        { x: -1, y: 1, z: -1.5 }, // 14
+        { x:  1, y: 1, z: -1.5 }  // 15
+    ],
+
+    edges: [
+        // Main body front
+        [0, 1],
+        [0, 2],
+        [1, 3],
+        [2, 3],
+
+        // Main body back
+        [4, 5],
+        [4, 6],
+        [5, 7],
+        [6, 7],
+
+        // Connect front/back of body
+        [0, 4],
+        [1, 5],
+        [2, 6],
+        [3, 7],
+
+        // Cabin front
+        [8, 9],
+        [8, 10],
+        [9, 11],
+        [10, 11],
+
+        // Cabin back
+        [12, 13],
+        [12, 14],
+        [13, 15],
+        [14, 15],
+
+        // Connect front/back of cabin
+        [8, 12],
+        [9, 13],
+        [10, 14],
+        [11, 15]
+    ],
+
+    triangles: [
+
+    // MAIN BODY
+    // Front
+    [0, 1, 3],
+    [0, 3, 2],
+
+    // Back
+    [4, 6, 7],
+    [4, 7, 5],
+
+    // Bottom
+    [0, 4, 5],
+    [0, 5, 1],
+
+    // Top
+    [2, 3, 7],
+    [2, 7, 6],
+
+    // Left side
+    [0, 2, 6],
+    [0, 6, 4],
+
+    // Right side
+    [1, 5, 7],
+    [1, 7, 3],
+
+
+    // CABIN
+    // Front
+    [8, 9, 11],
+    [8, 11, 10],
+
+    // Back
+    [12, 14, 15],
+    [12, 15, 13],
+
+    // Bottom
+    [8, 12, 13],
+    [8, 13, 9],
+
+    // Top
+    [10, 11, 15],
+    [10, 15, 14],
+
+    // Left side
+    [8, 10, 14],
+    [8, 14, 12],
+
+    // Right side
+    [9, 13, 15],
+    [9, 15, 11]
+    ]
+};
+
+// For streetlights 
+let lightsOn = true;
+
+// Instances of all objects
+let objects = [
+    // Buildings
+    {
+        model: buildingModel,
+        position: { x: -10, y: 0, z: 20 },
+        scale: 3,
+        color: "cyan"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: -10, y: 0, z: 40 },
+        scale: 2.5,
+        color: "magenta"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: 10, y: 0, z: 20 },
+        scale: 3.5,
+        color: "cyan"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: 10, y: 0, z: 40 },
+        scale: 4,
+        color: "magenta"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: -10, y: 0, z: 60 },
+        scale: 2.5,
+        color: "orange"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: 10, y: 0, z: 60 },
+        scale: 2.5,
+        color: "purple"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: -10, y: 0, z: 80 },
+        scale: 3,
+        color: "deeppink"
+    },
+
+    {
+        model: buildingModel,
+        position: { x: 10, y: 0, z: 80 },
+        scale: 3.5,
+        color: "dodgerblue"
+    },
+
+    // Streetlights
+    {
+        model: streetLightModel,
+        type: "streetLightModel",
+        position: { x: -3, y: 0, z: 8 },
+        scale: 1,
+        color: "yellow"
+    },
+
+    {
+        model: streetLightModel,
+        type: "streetLightModel",
+        position: { x: 3, y: 0, z: 13 },
+        scale: 1,
+        color: "yellow"
+    },
+
+    {
+        model: streetLightModel,
+        type: "streetLightModel",
+        position: { x: -3, y: 0, z: 13 },
+        scale: 1,
+        color: "yellow"
+    },
+
+    {
+        model: streetLightModel,
+        type: "streetLightModel",
+        position: { x: 3, y: 0, z: 8 },
+        scale: 1,
+        color: "yellow"
+    },
+
+    {
+        model: streetLightModel,
+        position: { x: -3, y: 0, z: 28 },
+        scale: 1,
+        color: "yellow",
+        type: "streetLightModel"
+    },
+
+    {
+        model: streetLightModel,
+        position: { x: 3, y: 0, z: 28 },
+        scale: 1,
+        color: "yellow",
+        type: "streetLightModel"
+    },
+
+    {
+        model: streetLightModel,
+        position: { x: -3, y: 0, z: 43 },
+        scale: 1,
+        color: "yellow",
+        type: "streetLightModel"
+    },
+
+    {
+        model: streetLightModel,
+        position: { x: 3, y: 0, z: 43 },
+        scale: 1,
+        color: "yellow",
+        type: "streetLightModel"
+    },
+
+    // Cars
+    {
+        model: carModel,
+        position: { x: -1.5, y: -2, z: 12 },
+        scale: 0.5,
+        color: "red"
+    },
+
+    {
+        model: carModel,
+        position: { x: 1.5, y: -2, z: 22 },
+        scale: 0.5,
+        color: "lime"
+    },
+
+    {
+        model: carModel,
+        position: { x: -1.5, y: -2, z: 30},
+        scale: 0.5,
+        color: "blue"
+    },
+
+    {
+        model: carModel,
+        position: { x: 1.5, y: -2, z: 45 },
+        scale: 0.5,
+        color: "orange"
+    },
+
+    {
+        model: carModel,
+        position: { x: -1.5, y: -2, z: 60 },
+        scale: 0.5,
+        color: "hotpink"
+    }
+];
+
+  // Camera position
+  let camera = {x: 0, y: 0, z: -10};
+
+
+function drawObject(object) {
+    // Stores the final 2D screen positions of this object's vertices
+    let projectedVertices = [];
+
+    // Go through each vertex in object's base model
+    for (let v = 0; v < object.model.vertices.length; v++) {
+
+        let vertex = object.model.vertices[v];
+
+        let worldVert = {};
+
+        // SCale then move to object's position in 3D world
+        worldVert.x = vertex.x * object.scale + object.position.x;
+        worldVert.y = vertex.y * object.scale + object.position.y;
+        worldVert.z = vertex.z * object.scale + object.position.z;
+
+        let camVert = {};
+
+        // Make position relative to camera
+        camVert.x = worldVert.x - camera.x;
+        camVert.y = worldVert.y - camera.y;
+        camVert.z = worldVert.z - camera.z;
+
+        // Pinhole camera projection
+        let canvasPos = {};
+
+        // Prevent division by 0
+        if (Math.abs(camVert.z) < 0.001) {
+          camVert.z = 0.001;
+        }
+
+        canvasPos.u = camVert.x / camVert.z;
+        canvasPos.v = camVert.y / camVert.z;
+
+        // Scale and center on canvas
+        if (renderMode === 2 || renderMode === 3) {
+
+          // Scale project to the 320 x 200 logical display
+          canvasPos.u = canvasPos.u * cols + cols / 2;
+          canvasPos.v = canvasPos.v * rows + rows / 2;
+        } else {
+
+          // Scale projection to normal canvas
+          canvasPos.u = canvasPos.u * canvas.width + canvas.width / 2;
+          canvasPos.v = canvasPos.v * canvas.height + canvas.height / 2;
+        }
+
+        canvasPos.z = camVert.z;
+        // Store the finished projection
+        projectedVertices.push(canvasPos)
+    }
+
+    // Level 3
+    if (renderMode === 3) {
+
+        for (let t = 0; t < object.model.triangles.length; t++) {
+
+            // Get the three vertex indexes for this triangle
+            let triangle = object.model.triangles[t];
+
+            let vertex1 = triangle[0];
+            let vertex2 = triangle[1];
+            let vertex3 = triangle[2];
+
+
+            // Get the projected versions of those vertices
+            let p1 = {
+                u: projectedVertices[vertex1].u,
+                v: rows - projectedVertices[vertex1].v,
+                z: projectedVertices[vertex1].z
+            };
+
+            let p2 = {
+                u: projectedVertices[vertex2].u,
+                v: rows - projectedVertices[vertex2].v,
+                z: projectedVertices[vertex2].z
+            };
+
+            let p3 = {
+                u: projectedVertices[vertex3].u,
+                v: rows - projectedVertices[vertex3].v,
+                z: projectedVertices[vertex3].z
+            };
+
+
+            let drawColor = object.color;
+
+            if (object.type === "streetLightModel") {
+
+                // First 12 triangles are the light fixture
+                // Remaining triangles are the pole
+                if (t >= 12) {
+                    drawColor = "gray";
+                }
+
+                // When lights are off, fixture also becomes gray
+                if (!lightsOn && t < 12) {
+                    drawColor = "gray";
+                }
+            }
+
+
+            // Only 1 triangle if all vertices
+            // are in front of the camera
+            if (
+                p1.z > 0 &&
+                p2.z > 0 &&
+                p3.z > 0
+            ) {
+
+                drawTriangle(
+                    p1,
+                    p2,
+                    p3,
+                    drawColor
+                );
+            }
+        }
+
+        // Level 3 does not need the edge drawing below
+        return;
+    }
+
+    // Draw the edges
+    for (let e = 0; e < object.model.edges.length; e++) {
+        // Get indexes of the vertices that make up this edge
+        let e1 = object.model.edges[e][0];
+        let e2 = object.model.edges[e][1];
+
+        let drawColor = object.color;
+        
+        // Get their projected screen positions
+        let u1 = projectedVertices[e1].u;
+        let u2 = projectedVertices[e2].u;
+
+        let v1;
+        let v2;
+
+        if (renderMode === 2 || renderMode === 3) {
+
+          v1 = rows - projectedVertices[e1].v;
+          v2 = rows - projectedVertices[e2].v;
+
+        } else {
+          
+          v1  = canvas.height - projectedVertices[e1].v;
+          v2  = canvas.height - projectedVertices[e2].v;
+
+        }
+
+        if (object.type === "streetLightModel" && !lightsOn) {
+          drawColor = "gray";
+        }
+        // Only draw the edge if both vertices are in front of the camera
+        if (
+          projectedVertices[e1].z > 0 && projectedVertices[e2].z > 0
+        ) {
+          if (renderMode === 2) {
+              // Level 2
+              drawPixelLine(u1, v1, u2, v2, drawColor);
+
+          } else if (renderMode === 1) {
+              drawLine(u1, v1, u2, v2, drawColor);
+          }
+        }
+    }
+}
+
+
+function draw() {
+
+    // Clear the previous frame
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Draw background
+    ctx.fillStyle = "#050510";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+
+    if (renderMode === 1) {
+
+      // Level 1
+      // Draw every object
+      for (let i = 0; i < objects.length; i++) {
+        drawObject(objects[i]);
+      }
+
+      
+    } else if (renderMode === 2) {
+
+      // Level 2
+      clearPixelGrid();
+
+      for (let i = 0; i < objects.length; i++) {
+        drawObject(objects[i]);
+      }
+
+      drawPixelGrid();
+
+    } else if (renderMode === 3) {
+
+        // Level 3
+        clearPixelGrid();
+        clearDepthBuffer();
+
+        for (let i = 0; i < objects.length; i++) {
+            drawObject(objects[i]);
+        }
+
+        drawPixelGrid();
+    }
+  }
+  //This uses a built in 'drawLine' function, provided by the javascript canvas
+  function drawLine(x1, y1, x2, y2, color){
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = color;
+
+    //this is how you draw a line on the canvas 
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  }
+
+
+  function drawPixelLine(u1, v1, u2, v2, color) {
+
+  // Round endpoints to logical pixel coordinates
+  u1 = Math.round(u1);
+  v1 = Math.round(v1);
+  u2 = Math.round(u2);
+  v2 = Math.round(v2);
+
+  let du = u2 - u1;
+  let dv = v2 - v1;
+
+  // Determine how many steps are necessary
+  let steps = Math.max(Math.abs(du), Math.abs(dv));
+
+  if (steps === 0) {
+    setPixelColor(u1, v1, color);
+    return;
+  }
+
+  // Amount u and v change during each step
+  let uIncrement = du / steps;
+  let vIncrement = dv / steps;
+
+  let u = u1;
+  let v = v1; 
+
+  for (let i = 0; i <= steps; i++) {
+
+    // Color the closest pixel
+    setPixelColor(Math.round(u), Math.round(v), color);
+    u += uIncrement;
+    v += vIncrement;
+
+  } 
+
+  }
+
+  function edgeFunction(a, b, p) {
+
+    return (p.u - a.u) * (b.v - a.v)
+         - (p.v - a.v) * (b.u - a.u);
+  }
+
+  function drawPixelGrid(){
+
+    //here we set up and clear the canvas, every draw frame
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#050510";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const gridWidth = cols * 5;
+    const gridHeight = rows * 5;
+
+    const offsetX = (canvas.width - gridWidth) / 2;
+    const offsetY = (canvas.height - gridHeight) / 2;
+
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "#444444";
+
+    for (let v = 0; v< 200; v++){
+      for (let u = 0; u<320; u++){
+
+        ctx.fillStyle = pixelGrid[u][v];
+        ctx.fillRect(offsetX + u * 5, offsetY + v*5, 5, 5);
+
+        if( seePixelOutline ){
+          ctx.strokeRect(offsetX + u * 5, offsetY + v * 5, 5, 5);
+        }
+
+      }
+    }
+  }
+
+  function clearPixelGrid() {
+
+    for (let u = 0; u < cols; u++) {
+
+        for (let v = 0; v < rows; v++) {
+
+            pixelGrid[u][v] = "#050510";
+        }
+    }
+}
+
+function drawTriangle(p1, p2, p3, color) {
+
+    // Find rectangular bounding box around triangle
+    let minU = Math.floor(Math.min(p1.u, p2.u, p3.u));
+    let maxU = Math.ceil(Math.max(p1.u, p2.u, p3.u));
+
+    let minV = Math.floor(Math.min(p1.v, p2.v, p3.v));
+    let maxV = Math.ceil(Math.max(p1.v, p2.v, p3.v));
+
+
+    // Keep bounding box inside 320 x 200 display
+    minU = Math.max(0, minU);
+    maxU = Math.min(cols - 1, maxU);
+
+    minV = Math.max(0, minV);
+    maxV = Math.min(rows - 1, maxV);
+
+
+    // Calculate triangle area using same edge orientation
+    // that we will use for the weights
+    let area = edgeFunction(p2, p3, p1);
+
+    // Ignore triangle if it has no area
+    if (Math.abs(area) < 0.000001) {
+        return;
+    }
+
+
+    // Check every pixel inside bounding box
+    for (let v = minV; v <= maxV; v++) {
+
+        for (let u = minU; u <= maxU; u++) {
+
+            // Center of current logical pixel
+            let p = {
+                u: u + 0.5,
+                v: v + 0.5
+            };
+
+
+            // Calculate barycentric weights
+            let w1 = edgeFunction(p2, p3, p) / area;
+            let w2 = edgeFunction(p3, p1, p) / area;
+            let w3 = edgeFunction(p1, p2, p) / area;
+
+
+            // Pixel is inside triangle if all weights
+            // are greater than or equal to zero
+            if (
+                w1 >= 0 &&
+                w2 >= 0 &&
+                w3 >= 0
+            ) {
+
+                // Perspective-correct depth
+                let inverseZ =
+                    w1 / p1.z +
+                    w2 / p2.z +
+                    w3 / p3.z;
+
+                let pixelDepth = 1 / inverseZ;
+
+
+                // Only replace pixel if this triangle
+                // is closer to the camera
+                if (pixelDepth < depthBuffer[u][v]) {
+
+                    depthBuffer[u][v] = pixelDepth;
+
+                    setPixelColor(u, v, color);
+                }
+            }
+        }
+    }
+}
+
+
+function clearDepthBuffer() {
+
+    for (let u = 0; u < cols; u++) {
+        for (let v = 0; v < rows; v++) {
+
+            depthBuffer[u][v] = Infinity;
+        }
+    }
+}
+
+
+  function setPixelColor(u, v, color) {
+
+    if (
+      u >= 0 && u < cols && v >= 0 && v < rows
+    ) {
+      pixelGrid[u][v] = color;
+    }
+  }
+
+
+  //this is how we detect events- 
+
+  // do nothing for now....
+    document.addEventListener("keydown", (event) => {
+
+      event.preventDefault();
+       switch (event.key) {
+        case "ArrowUp":
+          
+          console.log("Up arrow pressed");
+
+          // Prevent camera from moving too far
+          if (camera.z < 70) {
+              camera.z += 1;
+          }
+
+          draw();
+          break;
+        case "ArrowDown":
+          
+          console.log("Down arrow pressed");
+          camera.z -= 1;
+          draw();
+          break;
+        case "ArrowLeft":
+          
+          console.log("Left arrow pressed");
+          camera.x += 1;
+          draw();
+          break;
+        case "ArrowRight":
+          
+          console.log("Right arrow pressed");
+          camera.x -= 1;
+          draw();
+          break;
+        case "1":
+          renderMode = 1;
+          draw();
+          break;
+        case "2":
+          renderMode = 2;
+          draw();
+          break;
+        case "3":
+          renderMode = 3;
+          draw();
+          break;
+        case "r":
+        case "R":
+          
+          console.log("Reset");
+          camera = { x: 0, y: 0, z: -10 }; 
+          lightsOn = true;
+          draw();
+          break;
+        case " ":
+          lightsOn = !lightsOn;
+          draw();
+          break;
+        default:
+          return; 
+      
+      }
+    });
+
+  function resizeCanvas() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    draw();
+  }
+
+
+  window.addEventListener("resize", resizeCanvas);
+  
+  resizeCanvas();
+
+</script>
+</body>
+</html>
